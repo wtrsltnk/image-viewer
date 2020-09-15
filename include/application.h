@@ -3,11 +3,14 @@
 
 #include <filesystem>
 
-class IApplication
+class AbstractApplication
 {
 public:
-    virtual ~IApplication();
+    virtual ~AbstractApplication();
     
+    static void ActivateLoadingContext();
+    static void DeactivateLoadingContext();
+        
     virtual bool Setup(
         std::filesystem::path const&imagefile) = 0;
     virtual void Render3d() = 0;

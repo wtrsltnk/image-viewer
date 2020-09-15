@@ -2,6 +2,7 @@
 //                                  INCLUDES
 // =============================================================================
 #include <Windows.h>
+#include <wingdi.h>
 #include <random>
 #include <stdio.h>
 #include <glad/glad.h>
@@ -13,15 +14,18 @@
 #include <application.h>
 #include <wchar.h>
 #include <iostream>
+#include <thread>
+#include "resource.h"
 
-IApplication::~IApplication() = default;
+AbstractApplication::~AbstractApplication() = default;
 
-HGLRC   g_GLRenderContext;
-HDC     g_HDCDeviceContext;
-HWND    g_hwnd;
-int     g_display_w = 800; 
-int     g_display_h = 600;
-ImVec4  clear_color;
+static HDC     g_HDCDeviceContext = nullptr;
+static HGLRC   g_GLRenderContext = nullptr;
+static HGLRC   g_GLImageLoadingContext = nullptr;
+static HWND    g_hwnd;
+static int     g_display_w = 800; 
+static int     g_display_h = 600;
+static ImVec4  clear_color;
 
 void CreateGlContext();
 
@@ -39,9 +43,9 @@ bool Init(
 void Cleanup(
     HINSTANCE hInstance);
     
-extern IApplication* CreateApplication();
+extern AbstractApplication* CreateApplication();
 
-static IApplication *app = nullptr;
+static AbstractApplication *app = nullptr;
 
  int main(
      int argc,
@@ -77,6 +81,12 @@ static IApplication *app = nullptr;
             
         return 1;
     }
+
+    std::thread t([&]() {
+            std::cout << "Activated render context  : " << g_GLRenderContext << std::endl
+                      << "Activated loading context : " << g_GLImageLoadingContext << std::endl;
+        });
+    t.detach();
     
     // Main loop
     MSG msg;
@@ -98,6 +108,10 @@ static IApplication *app = nullptr;
             continue;
         }
 
+        wglMakeCurrent(
+            g_HDCDeviceContext,
+            g_GLRenderContext);
+        
         // Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplWin32_NewFrame();
@@ -131,11 +145,7 @@ static IApplication *app = nullptr;
     
         ImGui_ImplOpenGL3_RenderDrawData(
             ImGui::GetDrawData());
-            
-        wglMakeCurrent(
-            g_HDCDeviceContext,
-            g_GLRenderContext);
-            
+        
         SwapBuffers(
             g_HDCDeviceContext);
     }
@@ -158,6 +168,7 @@ bool Init(
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInstance;
     wc.hbrBackground = (HBRUSH)(COLOR_BACKGROUND);
+    wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDR_MAINWND));
     wc.lpszClassName = "IMGUI";
     wc.style = CS_OWNDC;
     
@@ -342,7 +353,7 @@ void CreateGlContext(){
 
     g_HDCDeviceContext = GetDC(
         g_hwnd);
-
+    
     int pixelFormat = ChoosePixelFormat(
         g_HDCDeviceContext,
         &pfd);
@@ -355,9 +366,33 @@ void CreateGlContext(){
     g_GLRenderContext = wglCreateContext(
         g_HDCDeviceContext);
     
+    g_GLImageLoadingContext = wglCreateContext(
+        g_HDCDeviceContext);
+    
+    BOOL error = wglShareLists(g_GLRenderContext, g_GLImageLoadingContext);
+
+    if(error == FALSE)
+    {
+        std::cerr << "failed to share render contexts\n";
+    }
+    
     wglMakeCurrent(
         g_HDCDeviceContext,
-        g_GLRenderContext);       
+        g_GLRenderContext);
 
     gladLoadGL();
+}
+
+void AbstractApplication::ActivateLoadingContext()
+{
+    wglMakeCurrent(
+        g_HDCDeviceContext,
+        g_GLImageLoadingContext);
+}
+
+void AbstractApplication::DeactivateLoadingContext()
+{
+    wglMakeCurrent(
+        g_HDCDeviceContext,
+        nullptr);
 }

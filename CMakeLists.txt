@@ -5,8 +5,6 @@ project(image-viewer)
 find_package(OPENGL REQUIRED)
 
 add_executable(image-viewer
-    application.cpp
-    glad.c
     imgui/imgui.cpp
     imgui/imgui.h
     imgui/imgui_demo.cpp
@@ -17,8 +15,11 @@ add_executable(image-viewer
     imgui/imgui_impl_win32.h
     imgui/imgui_internal.h
     imgui/imgui_widgets.cpp
-    main.cpp
-    stb_image.cpp
+    src/application.cpp
+    src/glad.c
+    src/image-viewer.rc
+    src/main.cpp
+    src/stb_image.cpp
     )
 
 target_include_directories(image-viewer

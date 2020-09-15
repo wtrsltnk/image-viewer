@@ -2,6 +2,9 @@
 #include <imgui.h>
 #include <iostream>
 #include <vector>
+#include <thread>
+#include <mutex>
+#include <future>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -12,7 +15,7 @@
 
 static struct {
     float width = 200.0f;
-    float height = 300.0f;
+    float height = 200.0f;
     int mousex = 0;
     int mousey = 0;
     int mouseImagex = 0;
@@ -27,6 +30,13 @@ static struct {
     bool mousePanning = false;
 
 } state;
+
+typedef struct {
+    int width = 200;
+    int height = 200;
+    int componentsPerPixel = 3;
+    GLuint index = 0;
+} LoadedImage;
 
 static std::string vertexGlsl = "#version 150\n\
 in vec3 vertex;\
@@ -102,7 +112,12 @@ GLuint LoadShaderProgram(
     const char* vertShaderSrc,
     const char* fragShaderSrc);
 
-class Application : public IApplication
+#define ICON_MIN_FA 0xe600
+#define ICON_MAX_FA 0xe900
+#define ICON_FA_ARROW_LEFT u8"\ue800"
+#define ICON_FA_ARROW_RIGHT u8"\ue801"
+
+class Application : public AbstractApplication
 {
     std::filesystem::path _imageFile;
     std::vector<std::filesystem::path> _paths;
@@ -114,17 +129,47 @@ class Application : public IApplication
     const int toolbarHeight = 70;
     const int itemWidth = 60;
     
-    struct {
-        int width = 200;
-        int height = 300;
-        int componentsPerPixel = 3;
-        GLuint index = 0;
-    } _image;
+    LoadedImage _image;
+    std::mutex _imageMutex;
+    
+    bool _isLoading = false;
 
-#define ICON_MIN_FA 0xe600
-#define ICON_MAX_FA 0xe900
-#define ICON_FA_ARROW_LEFT u8"\ue800"
-#define ICON_FA_ARROW_RIGHT u8"\ue801"
+    void SetCurrentImage(
+        std::filesystem::path const&imagefile,
+        int width,
+        int height,
+        int componentsPerPixel,
+        GLuint index)
+    {
+        std::lock_guard<std::mutex> guard(_imageMutex);
+        
+        if (_image.index > 0)
+        {
+            glDeleteTextures(1, &(_image.index));
+        }
+        
+        _imageFile = imagefile;
+        
+        _image.width = width;
+        _image.height = height;
+        _image.componentsPerPixel = componentsPerPixel;
+        _image.index = index;
+    
+        float horAspect = 1.0f;
+        float verAspect = 1.0f;
+        if (_image.width > state.width)
+        {
+            horAspect = float(state.width) / float(_image.width);
+        }
+        if (_image.height > (state.height - toolbarHeight - toolbarHeight))
+        {
+            verAspect = float(state.height - toolbarHeight - toolbarHeight) / float(_image.height);
+        }
+        
+        state.zoom = 100 * std::min(horAspect, verAspect);
+        state.translatex = 0;
+        state.translatey = 0;
+    }
 public:
     virtual bool Setup(
         std::filesystem::path const&imagefile)
@@ -134,28 +179,31 @@ public:
             _paths = GetFileInDirectory(imagefile.parent_path());
         }
         
-        SwitchImage(imagefile);
+        SwitchImageAsync(imagefile);
         
-    ImGuiIO &io = ImGui::GetIO();
-    io.Fonts->Clear();
+        ImGuiIO &io = ImGui::GetIO();
+        io.Fonts->Clear();
 
-    ImFont *font = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
-    if (font != nullptr)
-    {
-        io.FontDefault = font;
-    }
-    else
-    {
-        io.Fonts->AddFontDefault();
-    }
+        ImFont *font = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
+        if (font != nullptr)
+        {
+            io.FontDefault = font;
+        }
+        else
+        {
+            io.Fonts->AddFontDefault();
+        }
 
-    ImFontConfig config;
-    config.MergeMode = true;
+        ImFontConfig config;
+        config.MergeMode = true;
 
-    static const ImWchar icon_ranges[] = {ICON_MIN_FA, ICON_MAX_FA, 0};
-    io.Fonts->AddFontFromMemoryCompressedBase85TTF(icons_compressed_data_base85, 18.0f, &config, icon_ranges);
+        static const ImWchar icon_ranges[] = {ICON_MIN_FA, ICON_MAX_FA, 0};
+        io.Fonts->AddFontFromMemoryCompressedBase85TTF(icons_compressed_data_base85, 18.0f, &config, icon_ranges);
 
-    io.Fonts->Build();
+        io.Fonts->Build();
+        
+        io.IniFilename = nullptr;
+        io.WantSaveIniSettings = false;
         
         // Setup style
         ImGui::StyleColorsDark();
@@ -225,7 +273,10 @@ public:
         glEnableVertexAttribArray(0);
         glEnableVertexAttribArray(1);
         
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        if (!_isLoading)
+        {
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        }
 
         glDisableVertexAttribArray(0);
         glDisableVertexAttribArray(1);
@@ -241,26 +292,80 @@ public:
         ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, toolbarHeight));
         ImGui::SetNextWindowBgAlpha(0.35f);
         ImGui::Begin("FileInfo", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
-        const char *filename = _imageFile.string().c_str();
-        auto size = ImGui::CalcTextSize(filename, filename + _imageFile.string().size());
+        
         auto cursor = ImGui::GetCursorPos();
         
-        ImGui::SetCursorPos(ImVec2(cursor.x + ((ImGui::GetIO().DisplaySize.x - size.x) / 2.0), cursor.y + ImGui::GetStyle().FramePadding.y));
-        ImGui::Text("%s", _imageFile.string().c_str());
-        
-        ImGui::SetCursorPos(cursor);
-        if (ImGui::Button(ICON_FA_ARROW_LEFT, ImVec2(itemWidth, 0)))
+        if (!_isLoading)
         {
-            PreviousImageInDirectory();
+            const char *filename = _imageFile.string().c_str();
+            auto size = ImGui::CalcTextSize(filename, filename + _imageFile.string().size());
+            
+            ImGui::SetCursorPos(ImVec2(cursor.x + ((ImGui::GetIO().DisplaySize.x - size.x) / 2.0), cursor.y + ImGui::GetStyle().FramePadding.y));
+            ImGui::Text("%s", _imageFile.string().c_str());
+            
+            if (_imageFile != _paths.front())
+            {
+                ImGui::SetCursorPos(cursor);
+                if (ImGui::Button(ICON_FA_ARROW_LEFT, ImVec2(itemWidth, 0)))
+                {
+                    PreviousImageInDirectory();
+                }
+            }
+            
+            if (_imageFile != _paths.back())
+            {
+                ImGui::SetCursorPos(ImVec2(cursor.x + ImGui::GetContentRegionAvail().x - itemWidth, cursor.y));
+                if (ImGui::Button(ICON_FA_ARROW_RIGHT, ImVec2(itemWidth, 0)))
+                {
+                    NextImageInDirectory();
+                }
+            }
         }
-        
-        ImGui::SetCursorPos(ImVec2(cursor.x + ImGui::GetContentRegionAvail().x - itemWidth, cursor.y));
-        if (ImGui::Button(ICON_FA_ARROW_RIGHT, ImVec2(itemWidth, 0)))
+        else
         {
-            NextImageInDirectory();
+            const char *filename = _imageFile.string().c_str();
+            auto size = ImGui::CalcTextSize("Loading...", "Loading..." + sizeof("Loading..."));
+            
+            ImGui::SetCursorPos(ImVec2(cursor.x + ((ImGui::GetIO().DisplaySize.x - size.x) / 2.0), cursor.y + ImGui::GetStyle().FramePadding.y));
+            ImGui::Text("Loading...");
         }
-        
         ImGui::End();
+        
+        if (!_isLoading)
+        {
+            ImGui::SetNextWindowPos(ImVec2(0, toolbarHeight));
+            ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y - toolbarHeight));
+            ImGui::SetNextWindowBgAlpha(0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+            ImGui::Begin("Image", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
+            
+            ImGuiMouseCursor current = ImGui::GetMouseCursor();
+            ImGui::InvisibleButton("move me", ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y - toolbarHeight));
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetMouseCursor(2);
+            }
+            else
+            {
+                ImGui::SetMouseCursor(0);
+            }
+            ImGuiIO& io = ImGui::GetIO();
+            static ImVec2 dragStart, translateStart;
+            if (ImGui::IsMouseClicked(0))
+            {
+                dragStart = ImGui::GetCursorPos();
+                translateStart = ImVec2(state.translatex, state.translatey);
+            }
+            else if (ImGui::IsMouseDragging(0))
+            {
+                auto diff = ImGui::GetMouseDragDelta(0);
+                state.translatex = int(translateStart.x + diff.x);
+                state.translatey = int(translateStart.y + diff.y);
+            }
+            ImGui::End();
+            ImGui::PopStyleVar(2);
+        }
     }
     
     std::vector<std::filesystem::path> GetFileInDirectory(
@@ -297,7 +402,7 @@ public:
             return;
         }
         
-        SwitchImage(*found);
+        SwitchImageAsync(*found);
     }
     
     void NextImageInDirectory()
@@ -316,17 +421,17 @@ public:
             return;
         }
         
-        SwitchImage(*found);
+        SwitchImageAsync(*found);
     }
     
     void GotoFirstImageInDirectory()
     {
-        SwitchImage(_paths.front());
+        SwitchImageAsync(_paths.front());
     }
     
     void GotoLastImageInDirectory()
     {
-        SwitchImage(_paths.back());
+        SwitchImageAsync(_paths.back());
     }
     
     bool IsImage(
@@ -341,18 +446,36 @@ public:
         return false;
     }
     
+    void SwitchImageAsync(
+        std::filesystem::path const&imagefile)
+    {
+        if (_isLoading)
+        {
+            return;
+        }
+        
+        std::thread t([&, imagefile]() {
+                AbstractApplication::ActivateLoadingContext();
+                
+                SwitchImage(imagefile);
+                
+                AbstractApplication::DeactivateLoadingContext();
+            });
+        t.detach();
+    }
+    
     bool SwitchImage(
         std::filesystem::path const&imagefile)
     {
+        _isLoading = true;
+        
         GLuint newImageIndex = 0;
         int w, h, c;
         
         if (!imagefile.empty())
         {
-            _imageFile = imagefile;
-            
             unsigned char *data = stbi_load(
-                _imageFile.string().c_str(),
+                imagefile.string().c_str(),
                 &w,
                 &h,
                 &c,
@@ -370,35 +493,25 @@ public:
                 glBindTexture(GL_TEXTURE_2D, 0);
                 stbi_image_free(data);
                 
-                if (_image.index > 0)
-                {
-                    glDeleteTextures(1, &(_image.index));
-                }
+                SetCurrentImage(imagefile, w, h, 4, newImageIndex);
                 
-                _image.index = newImageIndex;
-                _image.width = w;
-                _image.height = h;
-                _image.componentsPerPixel = 4;
+                _isLoading = false;
                 
-                float horAspect = 1.0f;
-                float verAspect = 1.0f;
-                if (_image.width > state.width)
-                {
-                    horAspect = float(state.width) / float(_image.width);
-                }
-                if (_image.height > (state.height - toolbarHeight - toolbarHeight))
-                {
-                    verAspect = float(state.height - toolbarHeight - toolbarHeight) / float(_image.height);
-                }
-                
-                state.zoom = 100 * std::min(horAspect, verAspect);
                 return true;
             }
             else
             {
+                std::cerr << "failed to load image data from " << imagefile << std::endl;
+                
+                _isLoading = false;
+                
                 return false;
             }
         }
+
+        std::cerr << "image filename is not valid" << std::endl;
+
+        _isLoading = false;
         
         return false;
     }
@@ -434,7 +547,6 @@ public:
     virtual void OnZoom(
         int amount)
     {
-        std::cout << amount << std::endl;
         state.zoom += (amount * 10);
         if (state.zoom < 1)
         {
@@ -443,9 +555,9 @@ public:
     }
 };
 
-extern IApplication* CreateApplication();
+extern AbstractApplication* CreateApplication();
 
-IApplication* CreateApplication()
+AbstractApplication* CreateApplication()
 {
     return new Application();
 }
