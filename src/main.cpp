@@ -82,12 +82,6 @@ static AbstractApplication *app = nullptr;
         return 1;
     }
 
-    std::thread t([&]() {
-            std::cout << "Activated render context  : " << g_GLRenderContext << std::endl
-                      << "Activated loading context : " << g_GLImageLoadingContext << std::endl;
-        });
-    t.detach();
-    
     // Main loop
     MSG msg;
     ZeroMemory(

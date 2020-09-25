@@ -13,6 +13,8 @@
 #include <glm/gtx/string_cast.hpp>
 #include <stb_image.h>
 
+STBIDEF unsigned char *stbi_xload(char const *filename, int *x, int *y, int *frames);
+
 static struct {
     float width = 200.0f;
     float height = 200.0f;
@@ -31,11 +33,17 @@ static struct {
 
 } state;
 
+typedef struct frame {
+    int delay = 100;
+    GLuint index = 0;
+    struct frame *nextFrame = nullptr;
+} ImageFrame;
+
 typedef struct {
     int width = 200;
     int height = 200;
     int componentsPerPixel = 3;
-    GLuint index = 0;
+    ImageFrame *firstFrame = nullptr;
 } LoadedImage;
 
 static std::string vertexGlsl = "#version 150\n\
@@ -134,42 +142,6 @@ class Application : public AbstractApplication
     
     bool _isLoading = false;
 
-    void SetCurrentImage(
-        std::filesystem::path const&imagefile,
-        int width,
-        int height,
-        int componentsPerPixel,
-        GLuint index)
-    {
-        std::lock_guard<std::mutex> guard(_imageMutex);
-        
-        if (_image.index > 0)
-        {
-            glDeleteTextures(1, &(_image.index));
-        }
-        
-        _imageFile = imagefile;
-        
-        _image.width = width;
-        _image.height = height;
-        _image.componentsPerPixel = componentsPerPixel;
-        _image.index = index;
-    
-        float horAspect = 1.0f;
-        float verAspect = 1.0f;
-        if (_image.width > state.width)
-        {
-            horAspect = float(state.width) / float(_image.width);
-        }
-        if (_image.height > (state.height - toolbarHeight - toolbarHeight))
-        {
-            verAspect = float(state.height - toolbarHeight - toolbarHeight) / float(_image.height);
-        }
-        
-        state.zoom = 100 * std::min(horAspect, verAspect);
-        state.translatex = 0;
-        state.translatey = 0;
-    }
 public:
     virtual bool Setup(
         std::filesystem::path const&imagefile)
@@ -235,10 +207,10 @@ public:
     
     virtual void Cleanup()
     {
-        if (_image.index > 0)
+        if (_image.firstFrame->index > 0)
         {
-            glDeleteTextures(1, &(_image.index));
-            _image.index = 0;
+            glDeleteTextures(1, &(_image.firstFrame->index));
+            _image.firstFrame->index = 0;
         }
         if (_quadBufferIndex > 0)
         {
@@ -265,7 +237,10 @@ public:
 
         glUseProgram(_imageShader);
         
-        glBindTexture(GL_TEXTURE_2D, _image.index);
+        if (_image.firstFrame != nullptr)
+        {
+            glBindTexture(GL_TEXTURE_2D, _image.firstFrame->index);
+        }
         glUniformMatrix4fv(glGetUniformLocation(_imageShader, "u_projection"), 1, GL_FALSE, glm::value_ptr(projection));
         glUniformMatrix4fv(glGetUniformLocation(_imageShader, "u_view"), 1, GL_FALSE, glm::value_ptr(scale));
 
@@ -284,6 +259,7 @@ public:
         
         glUseProgram(0);
     }
+    
     virtual void Render2d()
     {
         //ImGui::ShowDemoWindow();
@@ -472,48 +448,122 @@ public:
         GLuint newImageIndex = 0;
         int w, h, c;
         
-        if (!imagefile.empty())
+        if (imagefile.empty())
         {
-            unsigned char *data = stbi_load(
+            std::cerr << "image filename is not valid" << std::endl;
+
+            _isLoading = false;
+            
+            return false;
+        }
+/*
+        if (imagefile.extension() == ".gif")
+        {
+            int frames = 0;
+            auto result = stbi_xload(
                 imagefile.string().c_str(),
                 &w,
                 &h,
-                &c,
-                4);
-                
-            if (data != nullptr)
-            {
-                glGenTextures(1, &newImageIndex);
-                glBindTexture(GL_TEXTURE_2D, newImageIndex);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+                &frames);
             
-                glBindTexture(GL_TEXTURE_2D, 0);
-                stbi_image_free(data);
-                
-                SetCurrentImage(imagefile, w, h, 4, newImageIndex);
-                
-                _isLoading = false;
-                
-                return true;
-            }
-            else
+            if (result == nullptr)
             {
-                std::cerr << "failed to load image data from " << imagefile << std::endl;
+                std::cerr << "failed to load gif data from " << imagefile << std::endl;
                 
                 _isLoading = false;
                 
                 return false;
             }
         }
+*/
+        unsigned char *data = stbi_load(
+            imagefile.string().c_str(),
+            &w,
+            &h,
+            &c,
+            4);
+            
+        if (data != nullptr)
+        {
+            glGenTextures(1, &newImageIndex);
+            glBindTexture(GL_TEXTURE_2D, newImageIndex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-        std::cerr << "image filename is not valid" << std::endl;
-
-        _isLoading = false;
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
         
-        return false;
+            glBindTexture(GL_TEXTURE_2D, 0);
+            stbi_image_free(data);
+            
+            GLuint indices[1] = {newImageIndex};
+            SetCurrentImage(imagefile, w, h, 4, indices, 1);
+            
+            _isLoading = false;
+            
+            return true;
+        }
+        else
+        {
+            std::cerr << "failed to load image data from " << imagefile << std::endl;
+            
+            _isLoading = false;
+            
+            return false;
+        }
+    }
+    
+    void SetCurrentImage(
+        std::filesystem::path const&imagefile,
+        int width,
+        int height,
+        int componentsPerPixel,
+        GLuint indices[],
+        int frameCount)
+    {
+        std::lock_guard<std::mutex> guard(_imageMutex);
+        
+        while (_image.firstFrame != nullptr)
+        {
+            auto tmp = _image.firstFrame;
+            _image.firstFrame = _image.firstFrame->nextFrame;
+            if (tmp->index > 0)
+            {
+                glDeleteTextures(1, &(tmp->index));
+            }
+            delete tmp;
+        }
+        
+        _imageFile = imagefile;
+        
+        _image.width = width;
+        _image.height = height;
+        _image.componentsPerPixel = componentsPerPixel;
+        
+        _image.firstFrame = new ImageFrame();
+        _image.firstFrame->index = indices[0];
+        auto current = _image.firstFrame;
+        for (int i = 1; i < frameCount; i++)
+        {
+            auto tmp = new ImageFrame();
+            tmp->index = indices[i];
+            current->nextFrame = tmp;
+            current = tmp;
+        }
+    
+        float horAspect = 1.0f;
+        float verAspect = 1.0f;
+        if (_image.width > state.width)
+        {
+            horAspect = float(state.width) / float(_image.width);
+        }
+        if (_image.height > (state.height - toolbarHeight - toolbarHeight))
+        {
+            verAspect = float(state.height - toolbarHeight - toolbarHeight) / float(_image.height);
+        }
+        
+        state.zoom = 100 * std::min(horAspect, verAspect);
+        state.translatex = 0;
+        state.translatey = 0;
     }
     
     virtual void OnResize(
