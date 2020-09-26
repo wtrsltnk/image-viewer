@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 3.14)
 
+set(CMAKE_BUILD_TYPE Debug)
 project(image-viewer)
 
 find_package(OPENGL REQUIRED)
+
+add_subdirectory("thirdparty/fmt")
 
 add_executable(image-viewer
     imgui/imgui.cpp
@@ -33,7 +36,8 @@ target_compile_features(image-viewer
 
 target_link_libraries(image-viewer
     PRIVATE
-        ${OPENGL_LIBRARIES})
+        ${OPENGL_LIBRARIES}
+        fmt::fmt)
 
 target_compile_options(image-viewer
     PUBLIC 

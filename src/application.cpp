@@ -149,9 +149,9 @@ public:
         if (!imagefile.empty())
         {
             _paths = GetFileInDirectory(imagefile.parent_path());
-        }
         
-        SwitchImageAsync(imagefile);
+            SwitchImageAsync(imagefile);
+        }
         
         ImGuiIO &io = ImGui::GetIO();
         io.Fonts->Clear();
@@ -279,7 +279,7 @@ public:
             ImGui::SetCursorPos(ImVec2(cursor.x + ((ImGui::GetIO().DisplaySize.x - size.x) / 2.0), cursor.y + ImGui::GetStyle().FramePadding.y));
             ImGui::Text("%s", _imageFile.string().c_str());
             
-            if (_imageFile != _paths.front())
+            if (!_paths.empty() && _imageFile != _paths.front())
             {
                 ImGui::SetCursorPos(cursor);
                 if (ImGui::Button(ICON_FA_ARROW_LEFT, ImVec2(itemWidth, 0)))
@@ -288,7 +288,7 @@ public:
                 }
             }
             
-            if (_imageFile != _paths.back())
+            if (!_paths.empty() && _imageFile != _paths.back())
             {
                 ImGui::SetCursorPos(ImVec2(cursor.x + ImGui::GetContentRegionAvail().x - itemWidth, cursor.y));
                 if (ImGui::Button(ICON_FA_ARROW_RIGHT, ImVec2(itemWidth, 0)))
@@ -364,6 +364,11 @@ public:
     
     void PreviousImageInDirectory()
     {
+        if (_paths.empty())
+        {
+            return;
+        }
+        
         auto found = std::find(_paths.rbegin(), _paths.rend(), _imageFile);
         
         if (found == _paths.rend())
@@ -383,6 +388,11 @@ public:
     
     void NextImageInDirectory()
     {
+        if (_paths.empty())
+        {
+            return;
+        }
+        
         auto found = std::find(_paths.begin(), _paths.end(), _imageFile);
         
         if (found == _paths.end())
@@ -541,6 +551,7 @@ public:
         
         _image.firstFrame = new ImageFrame();
         _image.firstFrame->index = indices[0];
+        
         auto current = _image.firstFrame;
         for (int i = 1; i < frameCount; i++)
         {
