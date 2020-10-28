@@ -1,11 +1,24 @@
 cmake_minimum_required(VERSION 3.14)
 
+include(cmake/CPM.cmake)
+
 set(CMAKE_BUILD_TYPE Debug)
+
 project(image-viewer)
 
-find_package(OPENGL REQUIRED)
+find_package(OpenGL REQUIRED)
 
-add_subdirectory("thirdparty/fmt")
+CPMAddPackage(
+  NAME fmt
+  GIT_TAG 7.1.0
+  GITHUB_REPOSITORY fmtlib/fmt
+)
+
+CPMAddPackage(
+  NAME glm
+  GITHUB_REPOSITORY g-truc/glm
+  GIT_TAG 0.9.9.7
+)
 
 add_executable(image-viewer
     imgui/imgui.cpp
@@ -27,8 +40,7 @@ add_executable(image-viewer
 
 target_include_directories(image-viewer
     PUBLIC include
-    PUBLIC imgui
-    PUBLIC glm)
+    PUBLIC imgui)
 
 target_compile_features(image-viewer
     PRIVATE cxx_std_17
@@ -37,7 +49,8 @@ target_compile_features(image-viewer
 target_link_libraries(image-viewer
     PRIVATE
         ${OPENGL_LIBRARIES}
-        fmt::fmt)
+        fmt::fmt
+        glm)
 
 target_compile_options(image-viewer
     PUBLIC 
