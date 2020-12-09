@@ -2,6 +2,8 @@
 #define APPLICATION_H
 
 #include <filesystem>
+#include <tuple>
+#include <vector>
 
 class AbstractApplication
 {
@@ -12,7 +14,8 @@ public:
     static void DeactivateLoadingContext();
         
     virtual bool Setup(
-        std::filesystem::path const&imagefile) = 0;
+        const std::filesystem::path &imagefile,
+        const std::vector<std::tuple<int, int, int, int>> &windowRects) = 0;
     virtual void Render3d() = 0;
     virtual void Render2d() = 0;
     virtual void Cleanup() = 0;

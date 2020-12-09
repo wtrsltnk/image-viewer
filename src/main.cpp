@@ -54,6 +54,7 @@ static AbstractApplication *app = nullptr;
      char *argv[])
  {  
     std::filesystem::path imageFile = std::filesystem::path();
+    std::vector<std::tuple<int, int, int, int>> windowRects;
     
     for (int i = 1; i < argc; i++)
     {
@@ -131,6 +132,32 @@ static AbstractApplication *app = nullptr;
         DeleteDC(hMemDC);
         ReleaseDC(NULL, hDC);
         DeleteObject(hBitmap);
+        
+        auto wnd = GetTopWindow(NULL);
+        while (wnd != NULL)
+        {
+            char lpString[255];
+            if (IsWindowVisible(wnd) && GetWindowText(wnd, lpString, 255) > 0)
+            {
+                RECT rect;
+                if (GetWindowRect(wnd, &rect) == TRUE && rect.left != 0 && rect.top != 0 && rect.right != 0 && rect.bottom != 0)
+                {
+                    windowRects.push_back(std::tuple<int, int, int, int>(rect.left, rect.top, rect.right, rect.bottom));
+                }
+            }
+            wnd = GetWindow(wnd, GW_HWNDNEXT);
+        }
+        
+        std::stringstream ss;
+        ss << "{"<< std::endl;
+        ss << "    \"rects\" : ["<< std::endl;
+        for (size_t i = 0; i < windowRects.size(); i++)
+        {
+            auto &rect = windowRects[i];
+            ss << "        { \"rect\" : \"" << std::get<0>(rect) << " " << std::get<1>(rect) << " " << std::get<2>(rect) << " " << std::get<3>(rect) << "\"}" << (i == windowRects.size()-1 ? "" : ",") << std::endl;
+        }
+        ss << "    ]"<< std::endl;
+        ss << "}"<< std::endl;
     }
     
     HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -142,7 +169,7 @@ static AbstractApplication *app = nullptr;
         return 1;
     }
     
-    if (!app->Setup(imageFile))
+    if (!app->Setup(imageFile, windowRects))
     {
         Cleanup(
             hInstance);

@@ -39,7 +39,7 @@ typedef struct frame {
     struct frame *nextFrame = nullptr;
 } ImageFrame;
 
-typedef struct {
+typedef struct loadedImage {
     int width = 200;
     int height = 200;
     int componentsPerPixel = 3;
@@ -128,6 +128,7 @@ GLuint LoadShaderProgram(
 class Application : public AbstractApplication
 {
     std::filesystem::path _imageFile;
+    std::vector<std::tuple<int, int, int, int>> _windowRects;
     std::vector<std::filesystem::path> _paths;
     ImFont *_font;
     ImFont *_icons;
@@ -144,8 +145,11 @@ class Application : public AbstractApplication
 
 public:
     virtual bool Setup(
-        std::filesystem::path const&imagefile)
+        const std::filesystem::path &imagefile,
+        const std::vector<std::tuple<int, int, int, int>> &windowRects)
     {
+        _windowRects = windowRects;
+        
         if (!imagefile.empty())
         {
             _paths = GetFileInDirectory(imagefile.parent_path());
