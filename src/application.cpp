@@ -134,6 +134,7 @@ class Application : public AbstractApplication
     ImFont *_icons;
     GLuint _imageShader;
     GLuint _quadBufferIndex;
+    int selectedWindowRect = -1;
     
     const int toolbarHeight = 70;
     const int itemWidth = 60;
@@ -616,6 +617,39 @@ public:
         if (state.zoom < 1)
         {
             state.zoom = 1;
+        }
+    }
+    
+    virtual void OnMousePositionChanged(
+        int mousePositionX,
+        int mousePositionY)
+    {
+        auto zoom = glm::scale(glm::mat4(1.0f), glm::vec3(state.zoom / 100.0f, -state.zoom / 100.0f, 1.0f));
+        auto translate = glm::translate(zoom, glm::vec3(state.translatex, state.translatey, 0.0f));
+        auto scale = glm::scale(translate, glm::vec3(_image.width, _image.height, 1.0f));
+        
+        auto projection = glm::ortho(-(state.width/2.0f), (state.width/2.0f), (state.height/2.0f), -(state.height/2.0f));
+        glm::vec4 viewport(0.0f, 0.0f, state.width, state.height);
+
+        glm::vec3 mousePosition(float(mousePositionX), float(mousePositionY), 0.0f);
+        auto screenPosition = glm::unProject(mousePosition, scale, projection, viewport);
+        auto imagePosition = glm::vec2((screenPosition.x+0.5f)*_image.width, (screenPosition.y+0.5f)*_image.height);
+        
+        int index = -1;
+        for (auto &rect : _windowRects)
+        {
+            index++;
+            if (imagePosition.x < std::get<0>(rect)) continue;
+            if (imagePosition.x > std::get<2>(rect)) continue;
+            if (imagePosition.y < std::get<1>(rect)) continue;
+            if (imagePosition.y > std::get<3>(rect)) continue;
+            
+            if (selectedWindowRect != index)
+            {
+                std::cout << "entering new rect @ index " << index << " : " << std::get<0>(rect) << " " << std::get<1>(rect) << " " << std::get<2>(rect) << " " << std::get<3>(rect) << std::endl;
+            }
+            selectedWindowRect = index;
+            break;
         }
     }
 };

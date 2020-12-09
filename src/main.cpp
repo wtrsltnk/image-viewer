@@ -1,6 +1,7 @@
 // =============================================================================
 //                                  INCLUDES
 // =============================================================================
+#include <Windowsx.h>
 #include <Windows.h>
 #include <wingdi.h>
 #include <random>
@@ -408,6 +409,11 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         case WM_MOUSEWHEEL:
         {
             app->OnZoom((float)GET_WHEEL_DELTA_WPARAM(wParam) / (float)WHEEL_DELTA);
+            return 0;
+        }
+        case WM_MOUSEMOVE:
+        {
+            app->OnMousePositionChanged(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             return 0;
         }
     }
