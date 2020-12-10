@@ -32,6 +32,7 @@ add_executable(image-viewer
     imgui/imgui_internal.h
     imgui/imgui_widgets.cpp
     src/application.cpp
+    include/application.h
     src/glad.c
     src/image-viewer.rc
     src/main.cpp

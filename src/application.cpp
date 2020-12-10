@@ -1,45 +1,42 @@
+#include <algorithm>
 #include <application.h>
-#include <imgui.h>
-#include <iostream>
-#include <vector>
-#include <thread>
-#include <mutex>
 #include <future>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <imgui.h>
+#include <iostream>
+#include <mutex>
+#include <thread>
+#include <vector>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/string_cast.hpp>
 #include <stb_image.h>
 
 STBIDEF unsigned char *stbi_xload(char const *filename, int *x, int *y, int *frames);
 
-static struct {
+static struct
+{
     float width = 200.0f;
     float height = 200.0f;
-    int mousex = 0;
-    int mousey = 0;
-    int mouseImagex = 0;
-    int mouseImagey = 0;
     int zoom = 100;
     int translatex = 0;
     int translatey = 0;
-    bool shiftPressed = false;
-    bool ctrlPressed = false;
     glm::vec2 contentPosition;
     glm::vec2 contentSize;
-    bool mousePanning = false;
 
 } state;
 
-typedef struct frame {
+typedef struct frame
+{
     int delay = 100;
     GLuint index = 0;
     struct frame *nextFrame = nullptr;
 } ImageFrame;
 
-typedef struct loadedImage {
+typedef struct loadedImage
+{
     int width = 200;
     int height = 200;
     int componentsPerPixel = 3;
@@ -73,16 +70,48 @@ void main()\
     color = texture(u_texture, f_texcoord);\
 }";
 
-static float g_vertex_buffer_data[] = {
-    0.5f,  0.5f,  0.0f,  1.0f, 1.0f,  0.0f,
-    0.5f, -0.5f,  0.0f,  1.0f, 0.0f,  0.0f,
-    -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,  0.0f,
-    -0.5f, -0.5f,  0.0f,  0.0f, 0.0f,  0.0f,
+static std::string overlayVertexGlsl = "#version 150\n\
+in vec3 vertex;\
+in vec4 color;\
+\
+uniform mat4 u_projection;\
+uniform mat4 u_view;\
+\
+out vec4 f_color;\
+\
+void main()\
+{\
+    gl_Position = u_projection * u_view * vec4(vertex.xyz, 1.0);\
+    f_color = color;\
+}";
+
+static std::string overlayFragmentGlsl = "#version 150\n\
+in vec4 f_color;\
+\
+out vec4 color;\
+\
+void main()\
+{\
+    color = f_color;\
+}";
+
+static float g_image_vertex_buffer_data[] = {
+    0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 0.0f,   // v0
+    0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f,  // v1
+    -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 0.0f,  // v2
+    -0.5f, -0.5f, 0.0f, 0.0f, 0.0f, 0.0f, // v3
+};
+
+float g_overlay_vertex_buffer_data[] = {
+    -0.5f, -0.5f, 0.0f, 1.0f, 1.0f, 1.0f, 0.5f, 0.0f, // v0
+    0.5f, -0.5f, 0.0f, 1.0f, 1.0f, 1.0f, 0.5f, 0.0f,  // v1
+    -0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 1.0f, 0.5f, 0.0f,  // v2
+    0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 1.0f, 0.5f, 0.0f,   // v3
 };
 
 // File: 'icons.ttf' (5060 bytes)
 // Exported using binary_to_compressed_c.cpp
-static const char icons_compressed_data_base85[4425+1] =
+static const char icons_compressed_data_base85[4425 + 1] =
     "7])#######P-P$c'/###W),##2(V$#Q6>##.FxF>6pY(/Q5)=-'OE/1I[n42R4aM:^,>>#-rEn/VNV=BLUJso)*m<-(NE/1E1XGHu='6v.c68%D(-p/,Jk7D=GIJQ6rEn/P3NP&%a(*H"
     "MY`=-:(m<-)p/K1#-0%J[r)`jN?uu#Fr.bI'-d<Bbi^mAXG:;$,uX&#TT$=(7iA&$+)m<-[v2:/<_[FHNo^sLRX;;$U#`5/o1JuBG>;mLJZ;;$r@^01sH[^IEr5c&nH:;$vrEn/+>00F"
     "jMrZG)B^0137YY#v%S+H@W$=lW#iH-PtgS/VcFVC;;cp0>pT/)g(m<-_uF%4^D-(#RApl8`Yx+#twCEHVle%#JQr.MtwSfL9b@6/b1+7DeA=gL345GMLLH##,x:T.,),##9*BK1'D(v#"
@@ -115,10 +144,10 @@ static const char icons_compressed_data_base85[4425+1] =
     "%+p+M.``pLH:)=->2#HM;kM91^CLmC2%A6M<nV26[W>2CcuQ>68U'NClS*)*E8[V[h1M9.IuZ55ag:/DeQHX19wx'&x`+I-:$#(&_5R,Em^OfN]U47MS&c?-K5g,M`kbRMb6wlLk^f:1"
     "l/s[0BKl$'cY/&GcuQ>6WDJAG_'C[0E.jT]&%MJ:mLI;8mN.KCK0Ad<cQnc)wQs+;LmLV=/JM>#ha.Q#HdY20Ji[V$oFD>#.VQb%]9fZ#fY((&,M+GMC__58#Jt$MBRGgLPeh58NZ7jM"
     "dw?##>s6B#[eQ][Kiox[+-cv[XqN30gA[0#F*4gNr<;U)88Y^?6PFU]>Fsl&]XMuu@LJ>Pq<^l8#m8AtHJh6W";
-    
+
 GLuint LoadShaderProgram(
-    const char* vertShaderSrc,
-    const char* fragShaderSrc);
+    const char *vertShaderSrc,
+    const char *fragShaderSrc);
 
 #define ICON_MIN_FA 0xe600
 #define ICON_MAX_FA 0xe900
@@ -130,18 +159,20 @@ class Application : public AbstractApplication
     std::filesystem::path _imageFile;
     std::vector<std::tuple<int, int, int, int>> _windowRects;
     std::vector<std::filesystem::path> _paths;
-    ImFont *_font;
-    ImFont *_icons;
     GLuint _imageShader;
-    GLuint _quadBufferIndex;
+    GLuint imageVAO;
+    GLuint imageVBO;
+    GLuint _overlayShader;
+    GLuint overlayVAO;
+    GLuint overlayVBO;
     int selectedWindowRect = -1;
-    
+
     const int toolbarHeight = 70;
     const int itemWidth = 60;
-    
+
     LoadedImage _image;
     std::mutex _imageMutex;
-    
+
     bool _isLoading = false;
 
 public:
@@ -150,14 +181,14 @@ public:
         const std::vector<std::tuple<int, int, int, int>> &windowRects)
     {
         _windowRects = windowRects;
-        
+
         if (!imagefile.empty())
         {
             _paths = GetFileInDirectory(imagefile.parent_path());
-        
+
             SwitchImageAsync(imagefile);
         }
-        
+
         ImGuiIO &io = ImGui::GetIO();
         io.Fonts->Clear();
 
@@ -178,10 +209,10 @@ public:
         io.Fonts->AddFontFromMemoryCompressedBase85TTF(icons_compressed_data_base85, 18.0f, &config, icon_ranges);
 
         io.Fonts->Build();
-        
+
         io.IniFilename = nullptr;
         io.WantSaveIniSettings = false;
-        
+
         // Setup style
         ImGui::StyleColorsDark();
         auto &style = ImGui::GetStyle();
@@ -196,94 +227,104 @@ public:
 
         _imageShader = LoadShaderProgram(vertexGlsl.c_str(), fragmentGlsl.c_str());
 
-        glGenBuffers(1, &_quadBufferIndex);
-        glBindBuffer(GL_ARRAY_BUFFER, _quadBufferIndex);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data), g_vertex_buffer_data, GL_STATIC_DRAW);
+        glGenVertexArrays(1, &imageVAO);
+        glBindVertexArray(imageVAO);
+        glGenBuffers(1, &imageVBO);
+        glBindBuffer(GL_ARRAY_BUFFER, imageVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(g_image_vertex_buffer_data), g_image_vertex_buffer_data, GL_STATIC_DRAW);
 
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void*)0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void *)0);
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void*)(sizeof(float) * 3));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void *)(sizeof(float) * 3));
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
-        
+
+        _overlayShader = LoadShaderProgram(overlayVertexGlsl.c_str(), overlayFragmentGlsl.c_str());
+
+        glGenVertexArrays(1, &overlayVAO);
+        glBindVertexArray(overlayVAO);
+        glGenBuffers(1, &overlayVBO);
+        glBindBuffer(GL_ARRAY_BUFFER, overlayVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(g_overlay_vertex_buffer_data), 0, GL_DYNAMIC_DRAW);
+
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        glBindVertexArray(0);
+
         return true;
     }
-    
-    virtual void Cleanup()
-    {
-        if (_image.firstFrame->index > 0)
-        {
-            glDeleteTextures(1, &(_image.firstFrame->index));
-            _image.firstFrame->index = 0;
-        }
-        if (_quadBufferIndex > 0)
-        {
-            glDeleteBuffers(1, &_quadBufferIndex);
-            _quadBufferIndex = 0;
-        }
-        if (_imageShader > 0)
-        {
-            glDeleteProgram(_imageShader);
-            _imageShader = 0;
-        }
-    }
-    
+
     virtual void Render3d()
     {
         auto zoom = glm::scale(glm::mat4(1.0f), glm::vec3(state.zoom / 100.0f));
         auto translate = glm::translate(zoom, glm::vec3(state.translatex, state.translatey, 0.0f));
         auto scale = glm::scale(translate, glm::vec3(_image.width, _image.height, 1.0f));
-        
-        auto projection = glm::ortho(-(state.width/2.0f), (state.width/2.0f), (state.height/2.0f), -(state.height/2.0f));
+
+        auto projection = glm::ortho(-(state.width / 2.0f), (state.width / 2.0f), (state.height / 2.0f), -(state.height / 2.0f));
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        glUseProgram(_imageShader);
-        
-        if (_image.firstFrame != nullptr)
-        {
-            glBindTexture(GL_TEXTURE_2D, _image.firstFrame->index);
-        }
-        glUniformMatrix4fv(glGetUniformLocation(_imageShader, "u_projection"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniformMatrix4fv(glGetUniformLocation(_imageShader, "u_view"), 1, GL_FALSE, glm::value_ptr(scale));
-
-        glBindBuffer(GL_ARRAY_BUFFER, _quadBufferIndex);
-        glEnableVertexAttribArray(0);
-        glEnableVertexAttribArray(1);
-        
         if (!_isLoading)
         {
+            glUseProgram(_imageShader);
+
+            glBindVertexArray(imageVAO);
+
+            glUniformMatrix4fv(glGetUniformLocation(_imageShader, "u_projection"), 1, GL_FALSE, glm::value_ptr(projection));
+            glUniformMatrix4fv(glGetUniformLocation(_imageShader, "u_view"), 1, GL_FALSE, glm::value_ptr(scale));
+
+            if (_image.firstFrame != nullptr)
+            {
+                glBindTexture(GL_TEXTURE_2D, _image.firstFrame->index);
+            }
+
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         }
 
-        glDisableVertexAttribArray(0);
-        glDisableVertexAttribArray(1);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        
+        if (selectedWindowRect != -1)
+        {
+            glUseProgram(_overlayShader);
+
+            glBindVertexArray(overlayVAO);
+
+            glBindBuffer(GL_ARRAY_BUFFER, overlayVBO);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(g_overlay_vertex_buffer_data), g_overlay_vertex_buffer_data);
+
+            glUniformMatrix4fv(glGetUniformLocation(_overlayShader, "u_projection"), 1, GL_FALSE, glm::value_ptr(projection));
+            glUniformMatrix4fv(glGetUniformLocation(_overlayShader, "u_view"), 1, GL_FALSE, glm::value_ptr(scale));
+
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        }
         glUseProgram(0);
     }
-    
+
     virtual void Render2d()
     {
         //ImGui::ShowDemoWindow();
-        
+
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, toolbarHeight));
         ImGui::SetNextWindowBgAlpha(0.35f);
         ImGui::Begin("FileInfo", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
-        
+
         auto cursor = ImGui::GetCursorPos();
-        
+
         if (!_isLoading)
         {
-            const char *filename = _imageFile.string().c_str();
-            auto size = ImGui::CalcTextSize(filename, filename + _imageFile.string().size());
-            
+            char temp[256];
+            strcpy_s(temp, 256, _imageFile.string().c_str());
+            auto size = ImGui::CalcTextSize(temp, temp + std::min<size_t>(256, _imageFile.string().size()));
+
             ImGui::SetCursorPos(ImVec2(cursor.x + ((ImGui::GetIO().DisplaySize.x - size.x) / 2.0), cursor.y + ImGui::GetStyle().FramePadding.y));
             ImGui::Text("%s", _imageFile.string().c_str());
-            
+
             if (!_paths.empty() && _imageFile != _paths.front())
             {
                 ImGui::SetCursorPos(cursor);
@@ -292,7 +333,7 @@ public:
                     PreviousImageInDirectory();
                 }
             }
-            
+
             if (!_paths.empty() && _imageFile != _paths.back())
             {
                 ImGui::SetCursorPos(ImVec2(cursor.x + ImGui::GetContentRegionAvail().x - itemWidth, cursor.y));
@@ -304,14 +345,14 @@ public:
         }
         else
         {
-            const char *filename = _imageFile.string().c_str();
-            auto size = ImGui::CalcTextSize("Loading...", "Loading..." + sizeof("Loading..."));
-            
+            const char *loading = "Loading...";
+            auto size = ImGui::CalcTextSize(loading, loading + sizeof(loading));
+
             ImGui::SetCursorPos(ImVec2(cursor.x + ((ImGui::GetIO().DisplaySize.x - size.x) / 2.0), cursor.y + ImGui::GetStyle().FramePadding.y));
             ImGui::Text("Loading...");
         }
         ImGui::End();
-        
+
         if (!_isLoading)
         {
             ImGui::SetNextWindowPos(ImVec2(0, toolbarHeight));
@@ -320,8 +361,7 @@ public:
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
             ImGui::Begin("Image", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
-            
-            ImGuiMouseCursor current = ImGui::GetMouseCursor();
+
             ImGui::InvisibleButton("move me", ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y - toolbarHeight));
             if (ImGui::IsItemHovered())
             {
@@ -331,7 +371,7 @@ public:
             {
                 ImGui::SetMouseCursor(0);
             }
-            ImGuiIO& io = ImGui::GetIO();
+
             static ImVec2 dragStart, translateStart;
             if (ImGui::IsMouseClicked(0))
             {
@@ -348,130 +388,149 @@ public:
             ImGui::PopStyleVar(2);
         }
     }
-    
+
+    virtual void Cleanup()
+    {
+        if (_image.firstFrame->index > 0)
+        {
+            glDeleteTextures(1, &(_image.firstFrame->index));
+            _image.firstFrame->index = 0;
+        }
+        if (_imageShader > 0)
+        {
+            glDeleteProgram(_imageShader);
+            _imageShader = 0;
+        }
+        if (_overlayShader > 0)
+        {
+            glDeleteProgram(_overlayShader);
+            _overlayShader = 0;
+        }
+    }
+
     std::vector<std::filesystem::path> GetFileInDirectory(
-        std::filesystem::path const&directory)
+        std::filesystem::path const &directory)
     {
         std::vector<std::filesystem::path> paths;
-        
+
         for (auto &p : std::filesystem::directory_iterator(directory))
         {
             if (!IsImage(p))
             {
                 continue;
             }
-            
+
             paths.push_back(p);
         }
-        
+
         return paths;
     }
-    
+
     void PreviousImageInDirectory()
     {
         if (_paths.empty())
         {
             return;
         }
-        
+
         auto found = std::find(_paths.rbegin(), _paths.rend(), _imageFile);
-        
+
         if (found == _paths.rend())
         {
             return;
         }
-        
+
         ++found;
-        
+
         if (found == _paths.rend())
         {
             return;
         }
-        
+
         SwitchImageAsync(*found);
     }
-    
+
     void NextImageInDirectory()
     {
         if (_paths.empty())
         {
             return;
         }
-        
+
         auto found = std::find(_paths.begin(), _paths.end(), _imageFile);
-        
+
         if (found == _paths.end())
         {
             return;
         }
-        
+
         ++found;
-        
+
         if (found == _paths.end())
         {
             return;
         }
-        
+
         SwitchImageAsync(*found);
     }
-    
+
     void GotoFirstImageInDirectory()
     {
         SwitchImageAsync(_paths.front());
     }
-    
+
     void GotoLastImageInDirectory()
     {
         SwitchImageAsync(_paths.back());
     }
-    
+
     bool IsImage(
-        std::filesystem::path const&file)
+        std::filesystem::path const &file)
     {
         if (file.extension() == ".png") return true;
         if (file.extension() == ".jpg") return true;
         if (file.extension() == ".bmp") return true;
         if (file.extension() == ".tga") return true;
         if (file.extension() == ".gif") return true;
-        
+
         return false;
     }
-    
+
     void SwitchImageAsync(
-        std::filesystem::path const&imagefile)
+        std::filesystem::path const &imagefile)
     {
         if (_isLoading)
         {
             return;
         }
-        
+
         std::thread t([&, imagefile]() {
-                AbstractApplication::ActivateLoadingContext();
-                
-                SwitchImage(imagefile);
-                
-                AbstractApplication::DeactivateLoadingContext();
-            });
+            AbstractApplication::ActivateLoadingContext();
+
+            SwitchImage(imagefile);
+
+            AbstractApplication::DeactivateLoadingContext();
+        });
         t.detach();
     }
-    
+
     bool SwitchImage(
-        std::filesystem::path const&imagefile)
+        std::filesystem::path const &imagefile)
     {
         _isLoading = true;
-        
+
         GLuint newImageIndex = 0;
         int w, h, c;
-        
+
         if (imagefile.empty())
         {
             std::cerr << "image filename is not valid" << std::endl;
 
             _isLoading = false;
-            
+
             return false;
         }
-/*
+        /*
         if (imagefile.extension() == ".gif")
         {
             int frames = 0;
@@ -480,13 +539,13 @@ public:
                 &w,
                 &h,
                 &frames);
-            
+
             if (result == nullptr)
             {
                 std::cerr << "failed to load gif data from " << imagefile << std::endl;
-                
+
                 _isLoading = false;
-                
+
                 return false;
             }
         }
@@ -497,7 +556,7 @@ public:
             &h,
             &c,
             4);
-            
+
         if (data != nullptr)
         {
             glGenTextures(1, &newImageIndex);
@@ -506,29 +565,29 @@ public:
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-        
+
             glBindTexture(GL_TEXTURE_2D, 0);
             stbi_image_free(data);
-            
+
             GLuint indices[1] = {newImageIndex};
             SetCurrentImage(imagefile, w, h, 4, indices, 1);
-            
+
             _isLoading = false;
-            
+
             return true;
         }
         else
         {
             std::cerr << "failed to load image data from " << imagefile << std::endl;
-            
+
             _isLoading = false;
-            
+
             return false;
         }
     }
-    
+
     void SetCurrentImage(
-        std::filesystem::path const&imagefile,
+        std::filesystem::path const &imagefile,
         int width,
         int height,
         int componentsPerPixel,
@@ -536,7 +595,7 @@ public:
         int frameCount)
     {
         std::lock_guard<std::mutex> guard(_imageMutex);
-        
+
         while (_image.firstFrame != nullptr)
         {
             auto tmp = _image.firstFrame;
@@ -547,16 +606,16 @@ public:
             }
             delete tmp;
         }
-        
+
         _imageFile = imagefile;
-        
+
         _image.width = width;
         _image.height = height;
         _image.componentsPerPixel = componentsPerPixel;
-        
+
         _image.firstFrame = new ImageFrame();
         _image.firstFrame->index = indices[0];
-        
+
         auto current = _image.firstFrame;
         for (int i = 1; i < frameCount; i++)
         {
@@ -565,7 +624,7 @@ public:
             current->nextFrame = tmp;
             current = tmp;
         }
-    
+
         float horAspect = 1.0f;
         float verAspect = 1.0f;
         if (_image.width > state.width)
@@ -576,12 +635,12 @@ public:
         {
             verAspect = float(state.height - toolbarHeight - toolbarHeight) / float(_image.height);
         }
-        
+
         state.zoom = 100 * std::min(horAspect, verAspect);
         state.translatex = 0;
         state.translatey = 0;
     }
-    
+
     virtual void OnResize(
         int w,
         int h)
@@ -589,27 +648,27 @@ public:
         state.width = w;
         state.height = h;
     }
-    
+
     virtual void OnPreviousPressed()
     {
         PreviousImageInDirectory();
     }
-    
+
     virtual void OnNextPressed()
     {
         NextImageInDirectory();
     }
-    
+
     virtual void OnHomePressed()
     {
         GotoFirstImageInDirectory();
     }
-    
+
     virtual void OnEndPressed()
     {
         GotoLastImageInDirectory();
     }
-    
+
     virtual void OnZoom(
         int amount)
     {
@@ -619,7 +678,7 @@ public:
             state.zoom = 1;
         }
     }
-    
+
     virtual void OnMousePositionChanged(
         int mousePositionX,
         int mousePositionY)
@@ -627,14 +686,14 @@ public:
         auto zoom = glm::scale(glm::mat4(1.0f), glm::vec3(state.zoom / 100.0f, -state.zoom / 100.0f, 1.0f));
         auto translate = glm::translate(zoom, glm::vec3(state.translatex, state.translatey, 0.0f));
         auto scale = glm::scale(translate, glm::vec3(_image.width, _image.height, 1.0f));
-        
-        auto projection = glm::ortho(-(state.width/2.0f), (state.width/2.0f), (state.height/2.0f), -(state.height/2.0f));
+
+        auto projection = glm::ortho(-(state.width / 2.0f), (state.width / 2.0f), (state.height / 2.0f), -(state.height / 2.0f));
         glm::vec4 viewport(0.0f, 0.0f, state.width, state.height);
 
         glm::vec3 mousePosition(float(mousePositionX), float(mousePositionY), 0.0f);
         auto screenPosition = glm::unProject(mousePosition, scale, projection, viewport);
-        auto imagePosition = glm::vec2((screenPosition.x+0.5f)*_image.width, (screenPosition.y+0.5f)*_image.height);
-        
+        auto imagePosition = glm::vec2((screenPosition.x + 0.5f) * _image.width, (screenPosition.y + 0.5f) * _image.height);
+
         int index = -1;
         for (auto &rect : _windowRects)
         {
@@ -643,27 +702,28 @@ public:
             if (imagePosition.x > std::get<2>(rect)) continue;
             if (imagePosition.y < std::get<1>(rect)) continue;
             if (imagePosition.y > std::get<3>(rect)) continue;
-            
+
             if (selectedWindowRect != index)
             {
                 std::cout << "entering new rect @ index " << index << " : " << std::get<0>(rect) << " " << std::get<1>(rect) << " " << std::get<2>(rect) << " " << std::get<3>(rect) << std::endl;
             }
+
             selectedWindowRect = index;
             break;
         }
     }
 };
 
-extern AbstractApplication* CreateApplication();
+extern AbstractApplication *CreateApplication();
 
-AbstractApplication* CreateApplication()
+AbstractApplication *CreateApplication()
 {
     return new Application();
 }
 
 GLuint LoadShaderProgram(
-    const char* vertShaderSrc,
-    const char* fragShaderSrc)
+    const char *vertShaderSrc,
+    const char *fragShaderSrc)
 {
     GLuint vertShader = glCreateShader(GL_VERTEX_SHADER);
     GLuint fragShader = glCreateShader(GL_FRAGMENT_SHADER);

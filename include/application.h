@@ -29,6 +29,9 @@ public:
     virtual void OnEndPressed() = 0;
     virtual void OnZoom(
         int amount) = 0;
+    virtual void OnMousePositionChanged(
+        int mousePositionX,
+        int mousePositionY) = 0;
 };
 
 #endif // APPLICATION_H
